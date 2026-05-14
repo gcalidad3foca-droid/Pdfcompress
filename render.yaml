@@ -1,5 +1,0 @@
-services:
-  - type: web
-    name: compresor-pdf-gs
-    runtime: docker
-    plan: free

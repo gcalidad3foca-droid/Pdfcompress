@@ -3,519 +3,432 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Compresor PDF · Ghostscript</title>
+<title>Comprimir PDF</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
-  :root {
-    --bg: #0f0f11;
-    --surface: #17171a;
-    --surface2: #1e1e22;
-    --border: rgba(255,255,255,0.07);
-    --accent: #e84c2b;
-    --accent2: #ff6b47;
-    --text: #f0ede8;
-    --muted: #7a7875;
-    --success: #2dd4a0;
-    --warn: #f5a623;
-    --radius: 12px;
-    --font: 'DM Sans', system-ui, sans-serif;
-  }
-  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
+:root {
+  --bg:     #0c0c0e;
+  --s1:     #141416;
+  --s2:     #1a1a1d;
+  --s3:     #212124;
+  --border: rgba(255,255,255,0.06);
+  --accent: #e84c2b;
+  --a2:     #ff6b47;
+  --text:   #eeebe6;
+  --muted:  #6b6865;
+  --muted2: #9b9895;
+  --ok:     #2dd4a0;
+  --warn:   #f5a623;
+  --r:      10px;
+  --font:   'DM Sans', system-ui, sans-serif;
+  --mono:   'DM Mono', monospace;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--text);
+  font-family: var(--font); min-height: 100vh;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 48px 20px 80px;
+}
+body::before {
+  content: ''; position: fixed; inset: 0;
+  background: radial-gradient(ellipse 60% 40% at 50% 0%, rgba(232,76,43,0.05) 0%, transparent 70%);
+  pointer-events: none;
+}
+.wrap { position: relative; z-index: 1; width: 100%; max-width: 600px; }
 
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+/* Header */
+.hdr { text-align: center; margin-bottom: 44px; }
+.status-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: var(--s1); border: 0.5px solid var(--border);
+  border-radius: 999px; padding: 7px 16px; margin-bottom: 28px;
+  font-size: 12px; font-weight: 500; color: var(--muted2);
+  letter-spacing: .03em; transition: all .3s;
+}
+.status-pill.online  { border-color: rgba(45,212,160,.25);  color: var(--ok); }
+.status-pill.offline { border-color: rgba(232,76,43,.25);   color: var(--a2); }
+.status-pill.waiting { border-color: rgba(245,166,35,.25);  color: var(--warn); }
+.sdot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+.status-pill.online  .sdot { box-shadow: 0 0 6px var(--ok);  animation: blink 2.4s ease infinite; }
+.status-pill.waiting .sdot { animation: blink .9s ease infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+h1 { font-size: 46px; font-weight: 600; letter-spacing: -.025em; line-height: 1.05; margin-bottom: 10px; }
+h1 span { color: var(--accent); }
+.sub { font-size: 15px; color: var(--muted2); font-weight: 300; }
 
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: var(--font);
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 40px 20px 60px;
-  }
+/* Drop */
+.drop {
+  background: var(--s1); border: 1.5px dashed rgba(255,255,255,.08);
+  border-radius: var(--r); padding: 44px 32px; text-align: center;
+  cursor: pointer; position: relative; transition: all .2s; margin-bottom: 16px;
+}
+.drop:hover, .drop.over { border-color: var(--accent); background: rgba(232,76,43,.03); }
+.drop input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+.drop-ico { font-size: 36px; opacity: .35; margin-bottom: 10px; }
+.drop-t   { font-size: 15px; font-weight: 500; margin-bottom: 5px; }
+.drop-st  { font-size: 13px; color: var(--muted); }
+.drop-hint { margin-top: 10px; font-size: 12px; color: var(--muted); font-style: italic; }
 
-  /* Grid de fondo */
-  body::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    background-image: linear-gradient(rgba(232,76,43,0.03) 1px, transparent 1px),
-                      linear-gradient(90deg, rgba(232,76,43,0.03) 1px, transparent 1px);
-    background-size: 40px 40px;
-    pointer-events: none;
-    z-index: 0;
-  }
+/* Lista archivos */
+.files-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+.file-row {
+  background: var(--s2); border: 0.5px solid var(--border);
+  border-radius: var(--r); padding: 13px 16px;
+  display: flex; align-items: center; gap: 12px; transition: all .2s;
+}
+.file-row.comprimiendo { border-color: rgba(232,76,43,.2); }
+.file-row.listo        { border-color: rgba(45,212,160,.2); }
+.file-row.error-row    { border-color: rgba(232,76,43,.3); }
+.frow-ico  { font-size: 22px; flex-shrink: 0; }
+.frow-info { flex: 1; overflow: hidden; min-width: 0; }
+.frow-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.frow-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.frow-prog { height: 2px; background: var(--s3); border-radius: 1px; margin-top: 7px; overflow: hidden; }
+.frow-prog-fill { height: 100%; width: 0%; background: var(--accent); border-radius: 1px; transition: width .35s ease; }
+.file-row.listo .frow-prog-fill { background: var(--ok); width: 100% !important; }
+.frow-pct  { font-size: 12px; font-family: var(--mono); color: var(--muted2); flex-shrink: 0; min-width: 36px; text-align: right; }
+.file-row.listo .frow-pct { color: var(--ok); }
+.frow-rm   { background: none; border: none; color: var(--muted); cursor: pointer; padding: 4px; font-size: 16px; flex-shrink: 0; transition: color .15s; }
+.frow-rm:hover { color: var(--accent); }
 
-  .wrapper { position: relative; z-index: 1; width: 100%; max-width: 620px; }
+/* Perfiles */
+.label-sec { font-size: 11px; font-weight: 600; letter-spacing: .07em; color: var(--muted); text-transform: uppercase; margin-bottom: 10px; }
+.perfiles  { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-bottom: 24px; }
+.pfbtn {
+  background: var(--s1); border: 0.5px solid var(--border);
+  border-radius: var(--r); padding: 13px 11px; cursor: pointer;
+  text-align: left; display: flex; flex-direction: column; gap: 3px;
+  transition: all .2s; color: var(--text);
+}
+.pfbtn:hover { border-color: rgba(255,255,255,.12); }
+.pfbtn.active { border-color: var(--accent); background: rgba(232,76,43,.07); }
+.pf-badge { font-size: 9px; font-weight: 700; letter-spacing: .05em; padding: 2px 6px; border-radius: 4px; margin-bottom: 3px; align-self: flex-start; }
+.b-red { background: rgba(232,76,43,.15); color: var(--a2); }
+.b-grn { background: rgba(45,212,160,.15); color: var(--ok); }
+.b-ylw { background: rgba(245,166,35,.15); color: var(--warn); }
+.pf-n  { font-size: 13px; font-weight: 500; }
+.pf-d  { font-size: 11px; color: var(--muted); line-height: 1.4; }
 
-  /* Header */
-  .header { text-align: center; margin-bottom: 40px; }
-  .logo {
-    display: inline-flex; align-items: center; gap: 10px;
-    background: var(--surface); border: 0.5px solid var(--border);
-    border-radius: 999px; padding: 8px 18px; margin-bottom: 28px;
-  }
-  .logo-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
-  .logo span { font-size: 13px; font-weight: 500; color: var(--muted); letter-spacing: 0.04em; }
-  h1 { font-size: 42px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; margin-bottom: 12px; }
-  h1 em { font-style: normal; color: var(--accent); }
-  .subtitle { font-size: 15px; color: var(--muted); font-weight: 300; }
+/* Botón */
+.btn-main {
+  width: 100%; background: var(--accent); border: none; border-radius: var(--r);
+  padding: 15px; color: #fff; font-family: var(--font); font-size: 15px; font-weight: 600;
+  cursor: pointer; transition: all .2s; letter-spacing: .01em;
+}
+.btn-main:hover:not(:disabled) { background: var(--a2); transform: translateY(-1px); }
+.btn-main:disabled { background: var(--s2); color: var(--muted); cursor: not-allowed; transform: none; }
 
-  /* Estado servidor */
-  .server-status {
-    display: flex; align-items: center; gap: 8px; justify-content: center;
-    margin-top: 16px; font-size: 13px;
-  }
-  .status-dot {
-    width: 7px; height: 7px; border-radius: 50%;
-    background: var(--muted); transition: background 0.3s;
-  }
-  .status-dot.online { background: var(--success); box-shadow: 0 0 8px var(--success); }
-  .status-dot.offline { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+/* Progreso global */
+.prog-wrap { display: none; margin-top: 14px; }
+.prog-wrap.visible { display: block; }
+.prog-label { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted2); margin-bottom: 6px; }
+.prog-label span:last-child { font-family: var(--mono); color: var(--a2); }
+.prog-bar  { height: 4px; background: var(--s2); border-radius: 2px; overflow: hidden; }
+.prog-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--a2)); border-radius: 2px; transition: width .4s ease; }
 
-  /* Zona de drop */
-  .drop-zone {
-    background: var(--surface);
-    border: 1.5px dashed var(--border);
-    border-radius: var(--radius);
-    padding: 48px 32px;
-    text-align: center;
-    cursor: pointer;
-    transition: all 0.2s;
-    margin-bottom: 24px;
-    position: relative;
-  }
-  .drop-zone:hover, .drop-zone.dragover {
-    border-color: var(--accent);
-    background: rgba(232,76,43,0.04);
-  }
-  .drop-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
-  .drop-icon { font-size: 40px; margin-bottom: 12px; opacity: 0.4; }
-  .drop-text { font-size: 15px; font-weight: 500; margin-bottom: 6px; }
-  .drop-sub { font-size: 13px; color: var(--muted); }
+/* Error */
+.err-msg { display: none; margin-top: 14px; background: rgba(232,76,43,.07); border: 0.5px solid rgba(232,76,43,.25); border-radius: 8px; padding: 12px 15px; font-size: 13px; color: var(--a2); }
+.err-msg.visible { display: block; }
 
-  /* Archivo seleccionado */
-  .file-info {
-    display: none;
-    background: var(--surface2);
-    border: 0.5px solid var(--border);
-    border-radius: var(--radius);
-    padding: 16px 20px;
-    margin-bottom: 24px;
-    align-items: center;
-    gap: 12px;
-  }
-  .file-info.visible { display: flex; }
-  .file-icon { font-size: 28px; flex-shrink: 0; }
-  .file-details { flex: 1; overflow: hidden; }
-  .file-name { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .file-size { font-size: 12px; color: var(--muted); margin-top: 2px; }
-  .file-remove {
-    background: none; border: none; color: var(--muted);
-    cursor: pointer; padding: 4px; font-size: 18px; line-height: 1;
-    transition: color 0.2s;
-  }
-  .file-remove:hover { color: var(--accent); }
-
-  /* Perfiles */
-  .section-label {
-    font-size: 12px; font-weight: 500; letter-spacing: 0.06em;
-    color: var(--muted); text-transform: uppercase; margin-bottom: 12px;
-  }
-  .perfiles {
-    display: grid; grid-template-columns: repeat(3, 1fr);
-    gap: 10px; margin-bottom: 28px;
-  }
-  .perfil-btn {
-    background: var(--surface); border: 0.5px solid var(--border);
-    border-radius: var(--radius); padding: 14px 12px;
-    cursor: pointer; text-align: left; transition: all 0.2s;
-    display: flex; flex-direction: column; gap: 4px;
-  }
-  .perfil-btn:hover { border-color: rgba(255,255,255,0.15); }
-  .perfil-btn.active {
-    border-color: var(--accent);
-    background: rgba(232,76,43,0.08);
-  }
-  .perfil-nombre { font-size: 13px; font-weight: 500; }
-  .perfil-desc { font-size: 11px; color: var(--muted); line-height: 1.4; }
-  .perfil-badge {
-    font-size: 10px; font-weight: 600; letter-spacing: 0.04em;
-    padding: 2px 6px; border-radius: 4px; margin-bottom: 4px;
-    align-self: flex-start;
-  }
-  .badge-screen { background: rgba(232,76,43,0.15); color: var(--accent2); }
-  .badge-ebook { background: rgba(45,212,160,0.15); color: var(--success); }
-  .badge-printer { background: rgba(245,166,35,0.15); color: var(--warn); }
-
-  /* Botón comprimir */
-  .btn-comprimir {
-    width: 100%;
-    background: var(--accent);
-    border: none;
-    border-radius: var(--radius);
-    padding: 16px;
-    color: white;
-    font-family: var(--font);
-    font-size: 15px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-    letter-spacing: 0.01em;
-    position: relative;
-    overflow: hidden;
-  }
-  .btn-comprimir:hover { background: var(--accent2); transform: translateY(-1px); }
-  .btn-comprimir:active { transform: translateY(0); }
-  .btn-comprimir:disabled {
-    background: var(--surface2); color: var(--muted);
-    cursor: not-allowed; transform: none;
-  }
-
-  /* Progress */
-  .progress-bar {
-    height: 3px; background: var(--surface2); border-radius: 2px;
-    margin-top: 12px; overflow: hidden; display: none;
-  }
-  .progress-bar.visible { display: block; }
-  .progress-fill {
-    height: 100%; width: 0%; background: var(--accent);
-    border-radius: 2px; transition: width 0.3s;
-    animation: pulse 1.5s ease-in-out infinite;
-  }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
-
-  /* Resultado */
-  .resultado {
-    display: none; margin-top: 24px;
-    background: var(--surface);
-    border: 0.5px solid rgba(45,212,160,0.2);
-    border-radius: var(--radius);
-    padding: 24px;
-  }
-  .resultado.visible { display: block; }
-  .resultado-header {
-    display: flex; align-items: center; gap: 10px; margin-bottom: 20px;
-  }
-  .check-icon { font-size: 22px; }
-  .resultado-title { font-size: 16px; font-weight: 600; }
-  .stats-grid {
-    display: grid; grid-template-columns: repeat(3, 1fr);
-    gap: 12px; margin-bottom: 20px;
-  }
-  .stat {
-    background: var(--surface2); border-radius: 8px; padding: 12px 14px;
-    text-align: center;
-  }
-  .stat-val { font-size: 20px; font-weight: 600; font-family: 'DM Mono', monospace; }
-  .stat-val.green { color: var(--success); }
-  .stat-label { font-size: 11px; color: var(--muted); margin-top: 3px; }
-
-  .btn-descargar {
-    width: 100%;
-    background: rgba(45,212,160,0.1);
-    border: 0.5px solid rgba(45,212,160,0.3);
-    border-radius: var(--radius);
-    padding: 14px;
-    color: var(--success);
-    font-family: var(--font);
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-    text-decoration: none;
-    display: block;
-    text-align: center;
-  }
-  .btn-descargar:hover { background: rgba(45,212,160,0.18); }
-
-  /* Error */
-  .error-msg {
-    display: none; margin-top: 16px;
-    background: rgba(232,76,43,0.08);
-    border: 0.5px solid rgba(232,76,43,0.3);
-    border-radius: 8px; padding: 14px 16px;
-    font-size: 13px; color: var(--accent2);
-  }
-  .error-msg.visible { display: block; }
-
-  /* Info servidor */
-  .info-box {
-    margin-top: 40px;
-    background: var(--surface);
-    border: 0.5px solid var(--border);
-    border-radius: var(--radius);
-    padding: 20px 24px;
-    font-size: 13px; color: var(--muted);
-  }
-  .info-box h3 { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 12px; }
-  .code-block {
-    background: var(--surface2); border-radius: 8px;
-    padding: 12px 14px; font-family: 'DM Mono', monospace;
-    font-size: 12px; color: #b8e0d2; margin: 8px 0;
-    border: 0.5px solid var(--border);
-  }
+/* Resultado */
+.resultado { display: none; margin-top: 20px; background: var(--s1); border: 0.5px solid rgba(45,212,160,.18); border-radius: var(--r); padding: 22px; }
+.resultado.visible { display: block; }
+.res-hdr   { display: flex; align-items: center; gap: 9px; margin-bottom: 18px; }
+.res-title { font-size: 15px; font-weight: 600; }
+.stats     { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-bottom: 18px; }
+.stat      { background: var(--s2); border-radius: 8px; padding: 11px 13px; text-align: center; }
+.sv        { font-size: 19px; font-weight: 600; font-family: var(--mono); }
+.sv.ok  { color: var(--ok); }
+.sv.bad { color: var(--warn); }
+.sl { font-size: 11px; color: var(--muted); margin-top: 3px; }
+.btn-dl {
+  width: 100%; display: block; text-align: center; text-decoration: none;
+  background: rgba(45,212,160,.09); border: 0.5px solid rgba(45,212,160,.28);
+  border-radius: var(--r); padding: 13px; color: var(--ok);
+  font-family: var(--font); font-size: 14px; font-weight: 600;
+  cursor: pointer; transition: all .2s;
+}
+.btn-dl:hover { background: rgba(45,212,160,.16); }
 </style>
 </head>
 <body>
+<div class="wrap">
 
-<div class="wrapper">
-  <!-- Header -->
-  <div class="header">
-    <div class="logo">
-      <div class="logo-dot"></div>
-      <span>Ghostscript Engine</span>
+  <div class="hdr">
+    <div class="status-pill" id="statusPill">
+      <div class="sdot"></div>
+      <span id="statusTxt">Conectando…</span>
     </div>
-    <h1>Compresor <em>PDF</em></h1>
-    <p class="subtitle">Misma tecnología de iLovePDF · 100% local · Sin límites</p>
-    <div class="server-status">
-      <div class="status-dot" id="statusDot"></div>
-      <span id="statusText" style="color:var(--muted); font-size:13px;">Verificando servidor...</span>
-    </div>
+    <h1>Comprimir <span>PDF</span></h1>
+    <p class="sub">Rápido · Sin límites · Privado</p>
   </div>
 
-  <!-- Drop Zone -->
-  <div class="drop-zone" id="dropZone">
-    <input type="file" id="fileInput" accept=".pdf">
-    <div class="drop-icon">📄</div>
-    <div class="drop-text">Arrastra tu PDF aquí</div>
-    <div class="drop-sub">o haz clic para seleccionar</div>
+  <div class="drop" id="dropZone">
+    <input type="file" id="fileInput" accept=".pdf,application/pdf" multiple>
+    <div class="drop-ico">📄</div>
+    <div class="drop-t">Arrastra tus PDFs aquí</div>
+    <div class="drop-st">o haz clic para seleccionar</div>
+    <div class="drop-hint">Puedes seleccionar varios archivos a la vez</div>
   </div>
 
-  <!-- Archivo seleccionado -->
-  <div class="file-info" id="fileInfo">
-    <div class="file-icon">📄</div>
-    <div class="file-details">
-      <div class="file-name" id="fileName"></div>
-      <div class="file-size" id="fileSize"></div>
-    </div>
-    <button class="file-remove" id="fileRemove" title="Quitar archivo">✕</button>
-  </div>
+  <div class="files-list" id="filesList"></div>
 
-  <!-- Perfiles -->
-  <div class="section-label">Nivel de compresión</div>
+  <div class="label-sec">Nivel de compresión</div>
   <div class="perfiles">
-    <button class="perfil-btn" data-perfil="extreme">
-      <span class="perfil-badge badge-screen">EXTREMA</span>
-      <span class="perfil-nombre">Extrema</span>
-      <span class="perfil-desc">72 DPI · Pantalla y web</span>
+    <button class="pfbtn" data-perfil="extreme">
+      <span class="pf-badge b-red">MÁXIMA</span>
+      <span class="pf-n">Máxima</span>
+      <span class="pf-d">Menor peso posible</span>
     </button>
-    <button class="perfil-btn active" data-perfil="recommended">
-      <span class="perfil-badge badge-ebook">RECOMENDADA</span>
-      <span class="perfil-nombre">Recomendada</span>
-      <span class="perfil-desc">150 DPI · Balance óptimo</span>
+    <button class="pfbtn active" data-perfil="recommended">
+      <span class="pf-badge b-grn">ÓPTIMA</span>
+      <span class="pf-n">Óptima</span>
+      <span class="pf-d">Balance ideal</span>
     </button>
-    <button class="perfil-btn" data-perfil="less">
-      <span class="perfil-badge badge-printer">CALIDAD</span>
-      <span class="perfil-nombre">Alta calidad</span>
-      <span class="perfil-desc">300 DPI · Imprimir</span>
+    <button class="pfbtn" data-perfil="less">
+      <span class="pf-badge b-ylw">CALIDAD</span>
+      <span class="pf-n">Alta calidad</span>
+      <span class="pf-d">Preserva detalles</span>
     </button>
   </div>
 
-  <!-- Botón -->
-  <button class="btn-comprimir" id="btnComprimir" disabled>
-    Selecciona un PDF para comprimir
-  </button>
+  <button class="btn-main" id="btnComprimir" disabled>Selecciona un PDF</button>
 
-  <!-- Progress -->
-  <div class="progress-bar" id="progressBar">
-    <div class="progress-fill" id="progressFill"></div>
+  <div class="prog-wrap" id="progWrap">
+    <div class="prog-label">
+      <span id="progLabel">Procesando…</span>
+      <span id="progPct">0%</span>
+    </div>
+    <div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>
   </div>
 
-  <!-- Error -->
-  <div class="error-msg" id="errorMsg"></div>
+  <div class="err-msg" id="errMsg"></div>
 
-  <!-- Resultado -->
   <div class="resultado" id="resultado">
-    <div class="resultado-header">
-      <span class="check-icon">✅</span>
-      <span class="resultado-title">¡Compresión completada!</span>
+    <div class="res-hdr">
+      <span style="font-size:20px">✅</span>
+      <span class="res-title" id="resTitulo">¡Listo!</span>
     </div>
-    <div class="stats-grid">
-      <div class="stat">
-        <div class="stat-val" id="statOriginal">—</div>
-        <div class="stat-label">Tamaño original</div>
-      </div>
-      <div class="stat">
-        <div class="stat-val" id="statComprimido">—</div>
-        <div class="stat-label">Comprimido</div>
-      </div>
-      <div class="stat">
-        <div class="stat-val green" id="statReduccion">—</div>
-        <div class="stat-label">Reducción</div>
-      </div>
+    <div class="stats">
+      <div class="stat"><div class="sv" id="stOrig">—</div><div class="sl">Original</div></div>
+      <div class="stat"><div class="sv" id="stComp">—</div><div class="sl">Comprimido</div></div>
+      <div class="stat"><div class="sv ok" id="stRed">—</div><div class="sl">Reducción</div></div>
     </div>
-    <a id="btnDescargar" class="btn-descargar" download>
-      ⬇ Descargar PDF comprimido
-    </a>
+    <a id="btnDl" class="btn-dl" download>⬇ Descargar</a>
   </div>
 
-  <!-- Info Render -->
-  <div class="info-box">
-    <h3>☁ Backend: Render.com + Ghostscript</h3>
-    <p style="margin-bottom:10px;">Este HTML llama a un servidor en la nube con Ghostscript real. Compresión equivalente a iLovePDF.</p>
-    <p style="font-size:12px; color: var(--warn);">⚠ El plan gratuito de Render <strong>duerme tras 15 min sin uso</strong>. La primera petición puede tardar ~30 segundos en despertar. Después funciona normal.</p>
-  </div>
 </div>
-
 <script>
-const SERVER = "https://pdfcompress-my7p.onrender.com"; // ← reemplaza con tu URL real de Render
-let archivoSeleccionado = null;
+const SERVER = "https://pdfcompress-my7p.onrender.com";
+
+let archivos     = [];
 let perfilActivo = "recommended";
-let blobDescarga = null;
+let servidorListo = false;
+let blobDescarga  = null;
 
-// Verificar servidor al cargar
-async function verificarServidor() {
-  const dot = document.getElementById("statusDot");
-  const txt = document.getElementById("statusText");
-  try {
-    const res = await fetch(`${SERVER}/estado`, { signal: AbortSignal.timeout(3000) });
-    const data = await res.json();
-    if (data.activo) {
-      dot.className = "status-dot online";
-      txt.textContent = `Servidor activo · Ghostscript ${data.ghostscript}`;
-      txt.style.color = "var(--success)";
-    }
-  } catch {
-    dot.className = "status-dot offline";
-    txt.textContent = "Servidor Render inactivo — iniciando, espera ~30 segundos...";
-    txt.style.color = "var(--accent)";
+// ── Servidor ──────────────────────────────────
+async function verificarServidor(silencioso = false) {
+  const MAX = 10, ESPERA = 5000;
+  for (let i = 1; i <= MAX; i++) {
+    if (!silencioso) setPill("waiting", i === 1 ? "Conectando…" : `Conectando… (${i}/${MAX})`);
+    try {
+      const r = await fetch(`${SERVER}/estado`, { signal: AbortSignal.timeout(8000) });
+      const d = await r.json();
+      if (d.activo) { servidorListo = true; setPill("online", "Activo"); return true; }
+    } catch {}
+    if (i < MAX) await sleep(ESPERA);
   }
+  servidorListo = false; setPill("offline", "Sin conexión"); return false;
 }
+function setPill(estado, texto) {
+  document.getElementById("statusPill").className = "status-pill " + estado;
+  document.getElementById("statusTxt").textContent = texto;
+}
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// Drag & Drop
+// ── Drop ──────────────────────────────────────
 const dropZone = document.getElementById("dropZone");
 const fileInput = document.getElementById("fileInput");
-
-dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("dragover"); });
-dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
+dropZone.addEventListener("dragover",  e => { e.preventDefault(); dropZone.classList.add("over"); });
+dropZone.addEventListener("dragleave", () => dropZone.classList.remove("over"));
 dropZone.addEventListener("drop", e => {
-  e.preventDefault();
-  dropZone.classList.remove("dragover");
-  const f = e.dataTransfer.files[0];
-  if (f && f.type === "application/pdf") seleccionarArchivo(f);
+  e.preventDefault(); dropZone.classList.remove("over");
+  agregarArchivos([...e.dataTransfer.files].filter(f => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")));
 });
-fileInput.addEventListener("change", e => {
-  if (e.target.files[0]) seleccionarArchivo(e.target.files[0]);
-});
+fileInput.addEventListener("change", e => { agregarArchivos([...e.target.files]); fileInput.value = ""; });
 
-function seleccionarArchivo(f) {
-  archivoSeleccionado = f;
-  document.getElementById("fileName").textContent = f.name;
-  document.getElementById("fileSize").textContent = formatBytes(f.size);
-  document.getElementById("fileInfo").classList.add("visible");
-  document.getElementById("btnComprimir").disabled = false;
-  document.getElementById("btnComprimir").textContent = "Comprimir con Ghostscript";
-  ocultarResultados();
+function agregarArchivos(nuevos) {
+  nuevos.forEach(f => { if (!archivos.find(a => a.name === f.name && a.size === f.size)) archivos.push(f); });
+  renderLista(); actualizarBoton();
 }
 
-document.getElementById("fileRemove").addEventListener("click", () => {
-  archivoSeleccionado = null;
-  fileInput.value = "";
-  document.getElementById("fileInfo").classList.remove("visible");
-  document.getElementById("btnComprimir").disabled = true;
-  document.getElementById("btnComprimir").textContent = "Selecciona un PDF para comprimir";
-  ocultarResultados();
-});
+function renderLista() {
+  const lista = document.getElementById("filesList");
+  lista.innerHTML = "";
+  archivos.forEach((f, i) => {
+    const row = document.createElement("div");
+    row.className = "file-row"; row.id = `frow-${i}`;
+    row.innerHTML = `
+      <div class="frow-ico">📄</div>
+      <div class="frow-info">
+        <div class="frow-name">${f.name}</div>
+        <div class="frow-meta">${formatBytes(f.size)}</div>
+        <div class="frow-prog"><div class="frow-prog-fill" id="fpfill-${i}"></div></div>
+      </div>
+      <div class="frow-pct" id="fpct-${i}">—</div>
+      <button class="frow-rm" data-i="${i}">✕</button>`;
+    lista.appendChild(row);
+  });
+  lista.querySelectorAll(".frow-rm").forEach(btn => {
+    btn.addEventListener("click", () => { archivos.splice(parseInt(btn.dataset.i), 1); renderLista(); actualizarBoton(); });
+  });
+}
 
-// Perfiles
-document.querySelectorAll(".perfil-btn").forEach(btn => {
+function actualizarBoton() {
+  const btn = document.getElementById("btnComprimir");
+  if (archivos.length === 0) { btn.disabled = true; btn.textContent = "Selecciona un PDF"; }
+  else { btn.disabled = false; btn.textContent = archivos.length === 1 ? "Comprimir" : `Comprimir ${archivos.length} archivos`; }
+}
+
+// ── Perfiles ──────────────────────────────────
+document.querySelectorAll(".pfbtn").forEach(btn => {
   btn.addEventListener("click", () => {
-    document.querySelectorAll(".perfil-btn").forEach(b => b.classList.remove("active"));
-    btn.classList.add("active");
-    perfilActivo = btn.dataset.perfil;
+    document.querySelectorAll(".pfbtn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active"); perfilActivo = btn.dataset.perfil;
   });
 });
 
-// Comprimir
+// ── Comprimir ─────────────────────────────────
 document.getElementById("btnComprimir").addEventListener("click", async () => {
-  if (!archivoSeleccionado) return;
-  
-  const btn = document.getElementById("btnComprimir");
-  const progress = document.getElementById("progressBar");
-  const fill = document.getElementById("progressFill");
-  const error = document.getElementById("errorMsg");
-  
+  if (archivos.length === 0) return;
+  const btn   = document.getElementById("btnComprimir");
+  const progW = document.getElementById("progWrap");
+  const fill  = document.getElementById("progFill");
+  const pct   = document.getElementById("progPct");
+  const lbl   = document.getElementById("progLabel");
+  const err   = document.getElementById("errMsg");
+
   btn.disabled = true;
-  btn.textContent = "Procesando con Ghostscript...";
-  progress.classList.add("visible");
-  fill.style.width = "15%";
-  error.classList.remove("visible");
-  ocultarResultados();
-  
-  // Progreso visual simulado
-  const progressInterval = setInterval(() => {
-    const actual = parseFloat(fill.style.width);
-    if (actual < 85) fill.style.width = (actual + (85 - actual) * 0.08) + "%";
-  }, 300);
-  
-  const formData = new FormData();
-  formData.append("pdf", archivoSeleccionado);
-  formData.append("perfil", perfilActivo);
-  
-  try {
-    const res = await fetch(`${SERVER}/comprimir`, { method: "POST", body: formData });
-    
-    clearInterval(progressInterval);
-    fill.style.width = "100%";
-    
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || "Error desconocido del servidor");
+  err.classList.remove("visible");
+  document.getElementById("resultado").classList.remove("visible");
+  progW.classList.add("visible");
+
+  if (!servidorListo) {
+    setProgreso(fill, pct, 0); lbl.textContent = "Despertando servidor…";
+    const ok = await verificarServidor();
+    if (!ok) {
+      progW.classList.remove("visible");
+      err.textContent = "El servidor no responde. Espera un momento e intenta de nuevo.";
+      err.classList.add("visible"); btn.disabled = false; actualizarBoton(); return;
     }
-    
-    const tamOriginal = parseInt(res.headers.get("X-Original-Size") || 0);
-    const tamComprimido = parseInt(res.headers.get("X-Compressed-Size") || 0);
-    const reduccion = parseFloat(res.headers.get("X-Reduction") || 0);
-    const tiempo = res.headers.get("X-Time") || "?";
-    
-    const blob = await res.blob();
-    if (blobDescarga) URL.revokeObjectURL(blobDescarga);
-    blobDescarga = URL.createObjectURL(blob);
-    
-    const nombreOriginal = archivoSeleccionado.name.replace(".pdf", "_comprimido.pdf");
-    const linkDescarga = document.getElementById("btnDescargar");
-    linkDescarga.href = blobDescarga;
-    linkDescarga.download = nombreOriginal;
-    linkDescarga.textContent = `⬇ Descargar ${nombreOriginal}`;
-    
-    document.getElementById("statOriginal").textContent = formatBytes(tamOriginal);
-    document.getElementById("statComprimido").textContent = formatBytes(tamComprimido);
-    document.getElementById("statReduccion").textContent = reduccion + "%";
-    document.getElementById("resultado").classList.add("visible");
-    
-    setTimeout(() => {
-      progress.classList.remove("visible");
-      fill.style.width = "0%";
-    }, 500);
-    
-  } catch (e) {
-    clearInterval(progressInterval);
-    progress.classList.remove("visible");
-    fill.style.width = "0%";
-    error.textContent = `Error: ${e.message}. El servidor Render puede estar iniciando (plan gratuito duerme tras 15 min de inactividad). Espera 30 segundos e intenta de nuevo.`;
-    error.classList.add("visible");
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "Comprimir con Ghostscript";
   }
+
+  const total = archivos.length;
+  const resultados = [];
+  let tamOrigTotal = 0, tamCompTotal = 0;
+
+  for (let i = 0; i < total; i++) {
+    const f    = archivos[i];
+    const frow = document.getElementById(`frow-${i}`);
+    const fpf  = document.getElementById(`fpfill-${i}`);
+    const fpct = document.getElementById(`fpct-${i}`);
+
+    frow.classList.add("comprimiendo");
+    lbl.textContent = total === 1 ? "Comprimiendo…" : `Comprimiendo ${i+1} de ${total}`;
+
+    const baseGlobal = (i / total) * 100;
+    let pctLocal = 5;
+    fpf.style.width = pctLocal + "%"; fpct.textContent = pctLocal + "%";
+
+    const animId = setInterval(() => {
+      pctLocal = Math.min(88, pctLocal + (88 - pctLocal) * 0.07);
+      fpf.style.width = pctLocal + "%";
+      fpct.textContent = Math.round(pctLocal) + "%";
+      setProgreso(fill, pct, baseGlobal + (pctLocal / 100) * (100 / total));
+    }, 350);
+
+    try {
+      const fd = new FormData();
+      fd.append("pdf", f); fd.append("perfil", perfilActivo);
+      const ctrl = new AbortController();
+      const tid  = setTimeout(() => ctrl.abort(), 180000);
+      const res  = await fetch(`${SERVER}/comprimir`, { method: "POST", body: fd, signal: ctrl.signal });
+      clearTimeout(tid); clearInterval(animId);
+
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `HTTP ${res.status}`); }
+
+      const orig = parseInt(res.headers.get("X-Original-Size")   || 0);
+      const comp = parseInt(res.headers.get("X-Compressed-Size") || 0);
+      const blob = await res.blob();
+      resultados.push({ nombre: f.name.replace(/\.pdf$/i, "_comprimido.pdf"), blob, orig, comp });
+      tamOrigTotal += orig; tamCompTotal += comp;
+      frow.classList.remove("comprimiendo"); frow.classList.add("listo"); fpct.textContent = "✓";
+
+    } catch(e) {
+      clearInterval(animId);
+      frow.classList.remove("comprimiendo"); frow.classList.add("error-row");
+      fpf.style.width = "100%"; fpf.style.background = "var(--accent)"; fpct.textContent = "✗";
+      resultados.push(null);
+    }
+  }
+
+  setProgreso(fill, pct, 100); lbl.textContent = "¡Completado!";
+  const exitosos = resultados.filter(Boolean);
+
+  if (exitosos.length === 0) {
+    progW.classList.remove("visible");
+    err.textContent = "No se pudo comprimir ningún archivo. Intenta de nuevo.";
+    err.classList.add("visible"); btn.disabled = false; actualizarBoton(); return;
+  }
+
+  if (blobDescarga) URL.revokeObjectURL(blobDescarga);
+  const dlBtn = document.getElementById("btnDl");
+
+  if (exitosos.length === 1) {
+    blobDescarga = URL.createObjectURL(exitosos[0].blob);
+    dlBtn.href = blobDescarga; dlBtn.download = exitosos[0].nombre;
+    dlBtn.textContent = `⬇ Descargar ${exitosos[0].nombre}`;
+  } else {
+    dlBtn.textContent = "⏳ Empaquetando ZIP…";
+    const zip = new JSZip();
+    exitosos.forEach(r => zip.file(r.nombre, r.blob));
+    const zipBlob = await zip.generateAsync({ type: "blob", compression: "DEFLATE" });
+    blobDescarga = URL.createObjectURL(zipBlob);
+    dlBtn.href = blobDescarga; dlBtn.download = "pdfs_comprimidos.zip";
+    dlBtn.textContent = `⬇ Descargar ZIP (${exitosos.length} archivos)`;
+  }
+
+  const red = tamOrigTotal > 0 ? ((1 - tamCompTotal / tamOrigTotal) * 100).toFixed(1) : 0;
+  document.getElementById("stOrig").textContent = formatBytes(tamOrigTotal);
+  document.getElementById("stComp").textContent = formatBytes(tamCompTotal);
+  const redEl = document.getElementById("stRed");
+  redEl.textContent = (parseFloat(red) >= 0 ? "−" : "+") + Math.abs(red) + "%";
+  redEl.className = "sv " + (parseFloat(red) >= 0 ? "ok" : "bad");
+  document.getElementById("resTitulo").textContent = exitosos.length === total
+    ? (total === 1 ? "¡Comprimido!" : `¡${total} archivos comprimidos!`)
+    : `${exitosos.length} de ${total} comprimidos`;
+  document.getElementById("resultado").classList.add("visible");
+
+  setTimeout(() => { progW.classList.remove("visible"); fill.style.width = "0%"; }, 800);
+  btn.disabled = false; actualizarBoton();
 });
 
-function ocultarResultados() {
-  document.getElementById("resultado").classList.remove("visible");
-  document.getElementById("errorMsg").classList.remove("visible");
+function setProgreso(fill, pct, valor) {
+  const v = Math.min(100, Math.max(0, valor));
+  fill.style.width = v + "%"; pct.textContent = Math.round(v) + "%";
 }
-
-function formatBytes(bytes) {
-  if (!bytes) return "—";
-  if (bytes < 1024) return bytes + " B";
-  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB";
-  return (bytes / 1048576).toFixed(2) + " MB";
+function formatBytes(b) {
+  if (!b) return "—";
+  if (b < 1024) return b + " B";
+  if (b < 1048576) return (b / 1024).toFixed(1) + " KB";
+  return (b / 1048576).toFixed(2) + " MB";
 }
 
 verificarServidor();
-setInterval(verificarServidor, 15000);
+setInterval(() => verificarServidor(true), 600000);
 </script>
 </body>
 </html>
-

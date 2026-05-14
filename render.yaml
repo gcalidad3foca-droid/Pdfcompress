@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: compresor-pdf-gs
+    runtime: python
+    buildCommand: "apt-get install -y ghostscript && pip install -r requirements.txt"
+    startCommand: "gunicorn servidor_gs:app"
+    plan: free
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0

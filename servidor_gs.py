@@ -1,29 +1,25 @@
 """
-Servidor Flask + Ghostscript - Compresor PDF
-Deploy en Render.com (plan gratuito)
+Servidor Flask - Compresor PDF de máxima calidad y velocidad
+Estrategia dual: pikepdf (estructura) + Ghostscript (imágenes)
+Deploy: Render.com con Dockerfile
 """
 
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
-import subprocess
-import tempfile
-import os
-import time
+import subprocess, tempfile, os, time, shutil
 
 app = Flask(__name__)
-
-# CORS abierto — ajusta el origen si quieres restringirlo a tu GitHub Pages
-CORS(app, expose_headers=["X-Original-Size", "X-Compressed-Size", "X-Reduction", "X-Time"])
+CORS(app, expose_headers=["X-Original-Size","X-Compressed-Size","X-Reduction","X-Time"])
 
 PERFILES = {
     "extreme": {
-        "label": "Extrema",
+        "label": "Máxima",
         "setting": "/screen",
-        "dpi_color": 72,
-        "dpi_gray": 72,
+        "dpi_color": 96,
+        "dpi_gray": 96,
     },
     "recommended": {
-        "label": "Recomendada",
+        "label": "Óptima",
         "setting": "/ebook",
         "dpi_color": 150,
         "dpi_gray": 150,
@@ -36,26 +32,120 @@ PERFILES = {
     }
 }
 
-def comprimir_pdf(input_path, output_path, perfil="recommended"):
+def comprimir_con_pikepdf(input_path, output_path):
+    """
+    Paso 1: pikepdf — limpieza estructural profunda sin tocar calidad visual.
+    Elimina objetos huérfanos, streams duplicados, metadatos, thumbnails,
+    y recomprime la tabla de objetos con QPDF.
+    """
+    try:
+        import pikepdf
+        with pikepdf.open(input_path, suppress_warnings=True) as pdf:
+            # Eliminar metadatos innecesarios
+            with pdf.open_metadata() as meta:
+                for key in list(meta.keys()):
+                    try: del meta[key]
+                    except: pass
+
+            # Eliminar thumbnails embebidos en cada página
+            for page in pdf.pages:
+                if "/Thumb" in page:
+                    del page["/Thumb"]
+
+            pdf.save(
+                output_path,
+                compress_streams=True,
+                object_stream_mode=pikepdf.ObjectStreamMode.generate,
+                recompress_flate=True,
+                linearize=True,   # optimiza para web (carga página a página)
+            )
+        return True
+    except Exception as e:
+        print(f"pikepdf falló: {e}")
+        return False
+
+def comprimir_con_ghostscript(input_path, output_path, perfil="recommended"):
+    """
+    Paso 2: Ghostscript — recompresión de imágenes con calidad controlada.
+    Usa /Average (rápido y casi igual que Bicubic), hilos múltiples.
+    """
     p = PERFILES.get(perfil, PERFILES["recommended"])
     cmd = [
         "gs",
         "-sDEVICE=pdfwrite",
-        "-dCompatibilityLevel=1.4",
+        "-dCompatibilityLevel=1.5",
         f"-dPDFSETTINGS={p['setting']}",
         "-dNOPAUSE", "-dQUIET", "-dBATCH",
-        "-dCompressFonts=true", "-dSubsetFonts=true", "-dEmbedAllFonts=true",
+        "-dCompressFonts=true",
+        "-dSubsetFonts=true",
+        "-dEmbedAllFonts=true",
+        "-dDetectDuplicateImages=true",
+        "-dNumRenderingThreads=4",
+        "-dDownsampleColorImages=true",
+        "-dDownsampleGrayImages=true",
+        "-dDownsampleMonoImages=true",
         f"-dColorImageResolution={p['dpi_color']}",
         f"-dGrayImageResolution={p['dpi_gray']}",
         "-dMonoImageResolution=300",
-        "-dColorImageDownsampleType=/Bicubic",
-        "-dGrayImageDownsampleType=/Bicubic",
+        "-dColorImageDownsampleType=/Average",
+        "-dGrayImageDownsampleType=/Average",
+        "-dMonoImageDownsampleType=/Subsample",
+        "-dColorImageFilter=/DCTEncode",
+        "-dAutoFilterColorImages=false",
+        "-dAutoFilterGrayImages=false",
+        "-dProcessColorModel=/DeviceRGB",
         "-dOptimize=true",
         f"-sOutputFile={output_path}",
         input_path
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
     return result.returncode == 0, result.stderr
+
+def comprimir_pdf(input_path, output_path, perfil="recommended"):
+    """
+    Estrategia dual:
+    1. pikepdf limpia la estructura → archivo intermedio
+    2. Ghostscript recomprime imágenes → archivo final
+    3. Se devuelve el menor de los tres (original, pikepdf, gs)
+    """
+    tmp_pike = input_path + "_pike.pdf"
+    tmp_gs   = input_path + "_gs.pdf"
+
+    try:
+        tam_orig = os.path.getsize(input_path)
+        mejor_path   = input_path
+        mejor_tam    = tam_orig
+
+        # Paso 1: pikepdf
+        pike_ok = comprimir_con_pikepdf(input_path, tmp_pike)
+        if pike_ok and os.path.exists(tmp_pike):
+            tam_pike = os.path.getsize(tmp_pike)
+            if tam_pike < mejor_tam:
+                mejor_path = tmp_pike
+                mejor_tam  = tam_pike
+
+        # Paso 2: Ghostscript sobre el mejor resultado hasta ahora
+        gs_ok, stderr = comprimir_con_ghostscript(mejor_path, tmp_gs, perfil)
+        if gs_ok and os.path.exists(tmp_gs):
+            tam_gs = os.path.getsize(tmp_gs)
+            if tam_gs < mejor_tam:
+                mejor_path = tmp_gs
+                mejor_tam  = tam_gs
+
+        # Copiar el mejor resultado al output final
+        if mejor_path != output_path:
+            shutil.copy2(mejor_path, output_path)
+
+        return True, ""
+
+    except Exception as e:
+        return False, str(e)
+
+    finally:
+        for f in [tmp_pike, tmp_gs]:
+            try:
+                if os.path.exists(f): os.unlink(f)
+            except: pass
 
 @app.route("/comprimir", methods=["POST"])
 def comprimir():
@@ -72,7 +162,7 @@ def comprimir():
         archivo.save(tmp_in.name)
         input_path = tmp_in.name
 
-    output_path = input_path.replace(".pdf", "_out.pdf")
+    output_path = input_path + "_final.pdf"
 
     try:
         t0 = time.time()
@@ -80,12 +170,12 @@ def comprimir():
         tiempo = round(time.time() - t0, 2)
 
         if not exito or not os.path.exists(output_path):
-            return jsonify({"error": f"Ghostscript falló: {stderr}"}), 500
+            return jsonify({"error": f"Error al comprimir: {stderr}"}), 500
 
-        tam_original  = os.path.getsize(input_path)
+        tam_original   = os.path.getsize(input_path)
         tam_comprimido = os.path.getsize(output_path)
-        reduccion     = round((1 - tam_comprimido / tam_original) * 100, 1)
-        nombre_salida = archivo.filename.replace(".pdf", "_comprimido.pdf")
+        reduccion      = round((1 - tam_comprimido / tam_original) * 100, 1)
+        nombre_salida  = archivo.filename.replace(".pdf", "_comprimido.pdf")
 
         response = send_file(
             output_path,
@@ -114,7 +204,6 @@ def estado():
         return jsonify({"activo": False}), 500
 
 if __name__ == "__main__":
-    # Render pasa el puerto por variable de entorno PORT
     port = int(os.environ.get("PORT", 5050))
     print(f"Servidor iniciado en puerto {port}")
     app.run(host="0.0.0.0", port=port)

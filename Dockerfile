@@ -13,3 +13,4 @@ COPY servidor_gs.py .
  
 EXPOSE 10000
 CMD ["gunicorn", "--bind", "0.0.0.0:10000", "--timeout", "300", "--workers", "2", "servidor_gs:app"]
+ 
